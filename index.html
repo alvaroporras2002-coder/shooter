@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Shooter 3D - Fase 1</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #000; }
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 10; }
+        /* Retícula central (Placeholder HUD) */
+        #crosshair { width: 6px; height: 6px; background: white; border-radius: 50%; opacity: 0.8; }
+        /* Menú de inicio */
+        #menu { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; z-index: 20; transition: opacity 0.3s; }
+        .instructions { margin-top: 20px; color: #ccc; text-align: center; line-height: 1.8; font-size: 1.1rem; }
+        span.key { background: #333; padding: 4px 8px; border-radius: 4px; font-weight: bold; border: 1px solid #555; }
+    </style>
+</head>
+<body>
+    <div id="menu">
+        <h1 style="margin:0; font-size: 3rem; color: #ff3333; text-transform: uppercase;">Motor Base Iniciado</h1>
+        <p style="font-size: 1.2rem;">Haz clic para entrar a la arena</p>
+        <div class="instructions">
+            <span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> - Movimiento<br><br>
+            <span class="key">SHIFT</span> - Correr (Sprint)<br><br>
+            <span class="key">C</span> - Agacharse (Tocar mientras corres para Deslizar)<br><br>
+            <span class="key">ESPACIO</span> - Saltar
+        </div>
+    </div>
+    
+    <div id="ui"><div id="crosshair"></div></div>
+
+    <!-- Importación de Three.js para gráficos y Cannon-es para físicas -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import * as CANNON from 'cannon-es';
+
+        // ==========================================
+        // 1. MOTOR GRÁFICO (Three.js)
+        // ==========================================
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); 
+        scene.fog = new THREE.Fog(0x87CEEB, 10, 80); // Niebla para profundidad
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // Iluminación global y sombras
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(50, 50, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 150;
+        dirLight.shadow.camera.left = -50;
+        dirLight.shadow.camera.right = 50;
+        dirLight.shadow.camera.top = 50;
+        dirLight.shadow.camera.bottom = -50;
+        scene.add(dirLight);
+
+        // ==========================================
+        // 2. MOTOR DE FÍSICAS (Cannon-es)
+        // ==========================================
+        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -18, 0) });
+        world.solver.iterations = 10;
+        
+        // Fricción y rebote
+        const defaultMaterial = new CANNON.Material("default");
+        const defaultContactMaterial = new CANNON.ContactMaterial(defaultMaterial, defaultMaterial, { 
+            friction: 0.2, 
+            restitution: 0.0 
+        });
+        world.addContactMaterial(defaultContactMaterial);
+
+        // ==========================================
+        // 3. ENTORNO Y MAPA BASE
+        // ==========================================
+        // Suelo Visual
+        const floorGeo = new THREE.PlaneGeometry(200, 200);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x444455, roughness: 0.9, metalness: 0.1 });
+        const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+        floorMesh.rotation.x = -Math.PI / 2;
+        floorMesh.receiveShadow = true;
+        scene.add(floorMesh);
+        
+        // Suelo Físico
+        const floorShape = new CANNON.Plane();
+        const floorBody = new CANNON.Body({ mass: 0, shape: floorShape, material: defaultMaterial });
+        floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(floorBody);
+
+        // Generar coberturas aleatorias (Placeholders)
+        const boxMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.7 });
+        for(let i = 0; i < 20; i++) {
+            const width = Math.random() * 3 + 1;
+            const height = Math.random() * 4 + 1;
+            const depth = Math.random() * 3 + 1;
+            
+            const boxGeo = new THREE.BoxGeometry(width, height, depth);
+            const boxMesh = new THREE.Mesh(boxGeo, boxMat);
+            boxMesh.castShadow = true;
+            boxMesh.receiveShadow = true;
+            
+            const boxShape = new CANNON.Box(new CANNON.Vec3(width/2, height/2, depth/2));
+            const boxBody = new CANNON.Body({ mass: 0, shape: boxShape, material: defaultMaterial });
+            
+            const x = (Math.random() - 0.5) * 80;
+            const z = (Math.random() - 0.5) * 80;
+            
+            boxMesh.position.set(x, height/2, z);
+            boxBody.position.set(x, height/2, z);
+            
+            scene.add(boxMesh);
+            world.addBody(boxBody);
+        }
+
+        // ==========================================
+        // 4. JUGADOR Y CONTROLES
+        // ==========================================
+        // Cuerpo físico del jugador (Esfera para deslizarse mejor por paredes)
+        const playerRadius = 0.6;
+        const playerShape = new CANNON.Sphere(playerRadius);
+        const playerBody = new CANNON.Body({ 
+            mass: 75, 
+            material: defaultMaterial, 
+            fixedRotation: true,
+            linearDamping: 0.9 // Fricción artificial
+        });
+        playerBody.addShape(playerShape, new CANNON.Vec3(0, playerRadius, 0)); 
+        playerBody.position.set(0, 5, 0); // Aparecer en el aire
+        world.addBody(playerBody);
+
+        const controls = new PointerLockControls(camera, document.body);
+        const menu = document.getElementById('menu');
+
+        menu.addEventListener('click', () => controls.lock());
+        controls.addEventListener('lock', () => menu.style.display = 'none');
+        controls.addEventListener('unlock', () => menu.style.display = 'flex');
+
+        // ==========================================
+        // 5. LÓGICA DE MOVIMIENTO AVANZADO
+        // ==========================================
+        const keys = { w: false, a: false, s: false, d: false, shift: false, c: false, space: false };
+        
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if(keys.hasOwnProperty(key)) keys[key] = true;
+            if(e.code === 'Space') keys.space = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if(keys.hasOwnProperty(key)) keys[key] = false;
+            if(e.code === 'Space') keys.space = false;
+        });
+
+        const walkForce = 600;
+        const runForce = 1100;
+        const crouchForce = 300;
+        const jumpVelocity = 8;
+        const slideImpulse = 400;
+        
+        let canJump = false;
+        let isSliding = false;
+        let slideTimer = 0;
+        const baseCameraHeight = 1.7; // Altura estándar de los ojos
+        const crouchCameraHeight = 0.8; // Altura al agacharse
+
+        // Detección estricta de suelo mediante colisiones
+        playerBody.addEventListener("collide", (e) => {
+            const contact = e.contact;
+            // Verificar que la colisión es desde abajo
+            if(contact.ni.y > 0.5) canJump = true; 
+        });
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            // 1. Actualizar el motor de físicas
+            world.step(1 / 60, delta, 3);
+
+            // 2. Gestionar la postura de la cámara
+            let targetHeight = baseCameraHeight;
+            let currentForce = keys.shift ? runForce : walkForce;
+
+            if (keys.c) {
+                targetHeight = crouchCameraHeight;
+                currentForce = crouchForce;
+                
+                // Mecánica de Deslizamiento (Slide)
+                if (keys.shift && !isSliding && canJump && (keys.w || keys.a || keys.s || keys.d)) {
+                    isSliding = true;
+                    slideTimer = 0.6; // Segundos que dura el impulso de slide
+                    
+                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                    forward.y = 0; forward.normalize();
+                    // Aplicar golpe de fuerza física
+                    playerBody.applyImpulse(new CANNON.Vec3(forward.x * slideImpulse, 0, forward.z * slideImpulse), playerBody.position);
+                }
+            } else {
+                isSliding = false;
+            }
+
+            // Interpolación matemática para que la cámara baje/suba suavemente
+            camera.position.x = playerBody.position.x;
+            camera.position.z = playerBody.position.z;
+            camera.position.y += (playerBody.position.y + targetHeight - camera.position.y) * 12 * delta;
+
+            // 3. Aplicar fuerzas de movimiento si la cámara está bloqueada
+            if (slideTimer > 0) slideTimer -= delta; // No permitir control total mientras desliza
+
+            if (controls.isLocked && slideTimer <= 0) {
+                // Obtener dirección a donde mira la cámara
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                forward.y = 0; forward.normalize();
+                
+                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+                right.y = 0; right.normalize();
+
+                const moveDir = new THREE.Vector3();
+                if (keys.w) moveDir.add(forward);
+                if (keys.s) moveDir.sub(forward);
+                if (keys.a) moveDir.sub(right);
+                if (keys.d) moveDir.add(right);
+                moveDir.normalize();
+
+                // Aplicar fuerza física al cuerpo
+                if (moveDir.lengthSq() > 0) {
+                    playerBody.force.x = moveDir.x * currentForce;
+                    playerBody.force.z = moveDir.z * currentForce;
+                }
+
+                // Mecánica de Salto
+                if (keys.space && canJump) {
+                    playerBody.velocity.y = jumpVelocity;
+                    canJump = false; // Se reiniciará cuando colisione con el suelo
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Responsive (Ajustar al redimensionar la ventana)
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
