@@ -84,4 +84,141 @@
 
         // Suelo y Muros simples
         createBlock(100, 1, 100, 0, -0.5, 0, 0x2a2a35); // Suelo
-        createBlock(1
+        createBlock(100, 10, 2, 0, 5, -50, 0x4a4a55); // Norte
+        createBlock(100, 10, 2, 0, 5, 50, 0x4a4a55);  // Sur
+        createBlock(2, 10, 100, -50, 5, 0, 0x4a4a55); // Oeste
+        createBlock(2, 10, 100, 50, 5, 0, 0x4a4a55);  // Este
+        
+        // Cajas de cobertura
+        for(let i=0; i<10; i++) {
+            createBlock(3, 3, 3, (Math.random()-0.5)*70, 1.5, (Math.random()-0.5)*70, 0xcc7722);
+        }
+
+        // 3. JUGADOR Y ARMA
+        const weaponGroup = new THREE.Group();
+        const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+        barrel.position.set(0, 0, -0.3); weaponGroup.add(barrel);
+        weaponGroup.position.set(0.25, -0.2, -0.4); camera.add(weaponGroup);
+
+        const playerBody = new CANNON.Body({ mass: 75, shape: new CANNON.Sphere(0.6), material: defaultMaterial, fixedRotation: true, linearDamping: 0.9 });
+        playerBody.position.set(0, 5, 0); world.addBody(playerBody);
+
+        const controls = new PointerLockControls(camera, document.body);
+        const menu = document.getElementById('menu');
+        menu.addEventListener('click', () => controls.lock());
+        controls.addEventListener('lock', () => menu.style.display = 'none');
+        controls.addEventListener('unlock', () => menu.style.display = 'flex');
+
+        // 4. ENEMIGOS (Inteligencia Artificial Básica)
+        const enemies = [];
+        function spawnEnemy(x, z) {
+            const size = 1.8;
+            const geo = new THREE.BoxGeometry(1, size, 1);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Enemigos rojos
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true; scene.add(mesh);
+
+            const shape = new CANNON.Box(new CANNON.Vec3(0.5, size/2, 0.5));
+            const body = new CANNON.Body({ mass: 50, shape: shape, material: defaultMaterial, fixedRotation: true, linearDamping: 0.9 });
+            body.position.set(x, 5, z); world.addBody(body);
+
+            mesh.userData = { id: enemies.length, hp: 100, isDead: false, body: body };
+            hitTargets.push(mesh);
+            enemies.push(mesh);
+        }
+
+        // Crear 4 enemigos iniciales
+        spawnEnemy(20, 20); spawnEnemy(-20, 20); spawnEnemy(20, -20); spawnEnemy(-20, -20);
+
+        // 5. SISTEMA DE DISPARO
+        let ammo = 30; const maxAmmo = 30; let isAiming = false;
+        const uiAmmo = document.getElementById('ammo'); const crosshair = document.getElementById('crosshair'); const killFeed = document.getElementById('kill-feed');
+        
+        document.addEventListener('contextmenu', e => e.preventDefault());
+        document.addEventListener('mousedown', (e) => { if(!controls.isLocked) return; if(e.button===2) isAiming=true; if(e.button===0) shoot(); });
+        document.addEventListener('mouseup', (e) => { if (e.button === 2) isAiming = false; });
+
+        const raycaster = new THREE.Raycaster();
+        function shoot() {
+            if (ammo <= 0) return;
+            ammo--; uiAmmo.innerText = `${ammo} / ${maxAmmo}`; weaponGroup.position.z += 0.1;
+            
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(hitTargets);
+            
+            if (intersects.length > 0) {
+                const target = intersects[0].object;
+                // Si le disparamos a un enemigo
+                if (target.userData && target.userData.hp !== undefined && !target.userData.isDead) {
+                    target.userData.hp -= 35; // Daño por bala
+                    target.material.color.setHex(0xffffff); // Destello blanco al recibir daño
+                    setTimeout(() => { if(!target.userData.isDead) target.material.color.setHex(0xff0000); }, 100);
+                    
+                    if (target.userData.hp <= 0) {
+                        target.userData.isDead = true;
+                        target.material.color.setHex(0x330000); // Color oscuro al morir
+                        killFeed.innerText = "Enemigo Abatido";
+                        setTimeout(() => killFeed.innerText = "", 2000);
+                        // Físicas de muerte temporal (caer al piso)
+                        target.userData.body.fixedRotation = false;
+                        target.userData.body.applyImpulse(new CANNON.Vec3(0, 0, -200).applyQuaternion(camera.quaternion), target.userData.body.position);
+                    }
+                }
+            }
+        }
+
+        document.addEventListener('keydown', (e) => { if(e.key.toLowerCase() === 'r') { ammo = maxAmmo; uiAmmo.innerText = `${ammo} / ${maxAmmo}`; }});
+
+        // 6. MOVIMIENTO Y BUCLE
+        const keys = { w: false, a: false, s: false, d: false, space: false };
+        document.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; if(e.code==='Space') keys.space=true; });
+        document.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; if(e.code==='Space') keys.space=false; });
+
+        let canJump = false; playerBody.addEventListener("collide", (e) => { if(e.contact.ni.y > 0.5) canJump = true; });
+
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            world.step(1 / 60, delta, 3);
+
+            // Actualizar Enemigos (IA)
+            enemies.forEach(enemy => {
+                enemy.position.copy(enemy.userData.body.position);
+                enemy.quaternion.copy(enemy.userData.body.quaternion);
+                
+                if (!enemy.userData.isDead && controls.isLocked) {
+                    // IA Básica: Mirar y moverse hacia el jugador
+                    const dir = new THREE.Vector3();
+                    dir.subVectors(playerBody.position, enemy.userData.body.position);
+                    dir.y = 0; dir.normalize();
+                    
+                    const speed = 200;
+                    enemy.userData.body.force.x = dir.x * speed;
+                    enemy.userData.body.force.z = dir.z * speed;
+                }
+            });
+
+            // Actualizar Jugador y Arma
+            camera.fov += ((isAiming ? 45 : 75) - camera.fov) * 12 * delta; camera.updateProjectionMatrix();
+            weaponGroup.position.lerp(isAiming ? new THREE.Vector3(0, -0.13, -0.3) : new THREE.Vector3(0.25, -0.2, -0.4), 15 * delta);
+            crosshair.style.opacity = isAiming ? '0' : '0.8';
+
+            camera.position.set(playerBody.position.x, playerBody.position.y + 1.7, playerBody.position.z);
+
+            if (controls.isLocked) {
+                const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); forward.y=0; forward.normalize();
+                const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); right.y=0; right.normalize();
+                const moveDir = new THREE.Vector3();
+                if(keys.w) moveDir.add(forward); if(keys.s) moveDir.sub(forward); if(keys.a) moveDir.sub(right); if(keys.d) moveDir.add(right);
+                moveDir.normalize();
+                if(moveDir.lengthSq() > 0) { playerBody.force.x = moveDir.x * 600; playerBody.force.z = moveDir.z * 600; }
+                if(keys.space && canJump) { playerBody.velocity.y = 8; canJump = false; }
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
