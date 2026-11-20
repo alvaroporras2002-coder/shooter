@@ -2,32 +2,37 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Shooter 3D - Fase 4</title>
+    <title>Shooter 3D - Fase 5</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #000; user-select: none; }
         #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
         #crosshair { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: white; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.8); transition: opacity 0.2s; }
+        
+        /* Efecto de daño (Sangre) */
+        #blood-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, transparent 40%, rgba(200,0,0,0.6) 100%); opacity: 0; transition: opacity 0.1s; pointer-events: none; z-index: 5; }
+        
         #hud-bottom { position: absolute; bottom: 30px; right: 40px; display: flex; flex-direction: column; align-items: flex-end; text-shadow: 2px 2px 2px #000; }
         #ammo { font-size: 3rem; color: #fff; font-weight: bold; }
         #ammo-label { font-size: 1rem; color: #aaa; text-transform: uppercase; letter-spacing: 2px; }
         #health-bar-container { position: absolute; bottom: 30px; left: 40px; width: 250px; height: 15px; background: rgba(0,0,0,0.5); border: 2px solid #555; }
-        #health-bar { width: 100%; height: 100%; background: #00ff55; transition: width 0.2s; }
+        #health-bar { width: 100%; height: 100%; background: #00ff55; transition: width 0.2s, background-color 0.2s; }
         #menu { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; z-index: 20; transition: opacity 0.3s; }
         .instructions { margin-top: 20px; color: #ccc; text-align: center; line-height: 1.8; font-size: 1.1rem; }
         span.key { background: #333; padding: 4px 8px; border-radius: 4px; font-weight: bold; border: 1px solid #555; }
-        #kill-feed { position: absolute; top: 20px; right: 20px; color: #ff4444; font-weight: bold; font-size: 1.2rem; text-shadow: 1px 1px 2px black; }
+        #kill-feed { position: absolute; top: 20px; right: 20px; color: #ff4444; font-weight: bold; font-size: 1.5rem; text-shadow: 2px 2px 2px black; font-style: italic; }
     </style>
 </head>
 <body>
     <div id="menu">
-        <h1 style="margin:0; font-size: 3rem; color: #ff3333; text-transform: uppercase;">Fase 4: Enemigos y Combate</h1>
+        <h1 style="margin:0; font-size: 3rem; color: #ff3333; text-transform: uppercase;">Fase 5: Ragdoll y Daño</h1>
         <p style="font-size: 1.2rem;">Haz clic para entrar a la arena</p>
         <div class="instructions">
-            Sobrevive. Los enemigos te seguirán.<br><br>
-            <span class="key">W A S D</span> Movimiento | <span class="key">Clic Izq</span> Disparar | <span class="key">Clic Der</span> Apuntar
+            ¡Los enemigos ahora te hacen daño! Dispara a la cabeza para eliminarlos rápido.<br><br>
+            <span class="key">W A S D</span> Moverse | <span class="key">Clic Izq</span> Disparar | <span class="key">R</span> Recargar
         </div>
     </div>
     
+    <div id="blood-screen"></div>
     <div id="ui">
         <div id="crosshair"></div>
         <div id="kill-feed"></div>
@@ -82,19 +87,18 @@
             hitTargets.push(mesh);
         }
 
-        // Suelo y Muros simples
         createBlock(100, 1, 100, 0, -0.5, 0, 0x2a2a35); // Suelo
         createBlock(100, 10, 2, 0, 5, -50, 0x4a4a55); // Norte
         createBlock(100, 10, 2, 0, 5, 50, 0x4a4a55);  // Sur
         createBlock(2, 10, 100, -50, 5, 0, 0x4a4a55); // Oeste
         createBlock(2, 10, 100, 50, 5, 0, 0x4a4a55);  // Este
-        
-        // Cajas de cobertura
-        for(let i=0; i<10; i++) {
-            createBlock(3, 3, 3, (Math.random()-0.5)*70, 1.5, (Math.random()-0.5)*70, 0xcc7722);
-        }
+        for(let i=0; i<15; i++) createBlock(3, 3, 3, (Math.random()-0.5)*70, 1.5, (Math.random()-0.5)*70, 0xcc7722);
 
-        // 3. JUGADOR Y ARMA
+        // 3. JUGADOR
+        let playerHealth = 100;
+        const uiHealthBar = document.getElementById('health-bar');
+        const bloodScreen = document.getElementById('blood-screen');
+
         const weaponGroup = new THREE.Group();
         const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), new THREE.MeshStandardMaterial({ color: 0x222222 }));
         barrel.position.set(0, 0, -0.3); weaponGroup.add(barrel);
@@ -109,30 +113,42 @@
         controls.addEventListener('lock', () => menu.style.display = 'none');
         controls.addEventListener('unlock', () => menu.style.display = 'flex');
 
-        // 4. ENEMIGOS (Inteligencia Artificial Básica)
+        // 4. ENEMIGOS: SISTEMA RAGDOLL MODULAR
         const enemies = [];
-        function spawnEnemy(x, z) {
-            const size = 1.8;
-            const geo = new THREE.BoxGeometry(1, size, 1);
-            const mat = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Enemigos rojos
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.castShadow = true; scene.add(mesh);
+        const enemyMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
 
-            const shape = new CANNON.Box(new CANNON.Vec3(0.5, size/2, 0.5));
-            const body = new CANNON.Body({ mass: 50, shape: shape, material: defaultMaterial, fixedRotation: true, linearDamping: 0.9 });
-            body.position.set(x, 5, z); world.addBody(body);
+        function spawnRagdollEnemy(x, z) {
+            // Torso
+            const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1.2, 1), enemyMat.clone());
+            torsoMesh.castShadow = true; scene.add(torsoMesh);
+            const torsoBody = new CANNON.Body({ mass: 40, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.6, 0.5)), material: defaultMaterial, fixedRotation: true, linearDamping: 0.9 });
+            torsoBody.position.set(x, 1.5, z); world.addBody(torsoBody);
 
-            mesh.userData = { id: enemies.length, hp: 100, isDead: false, body: body };
-            hitTargets.push(mesh);
-            enemies.push(mesh);
+            // Cabeza (Punto débil)
+            const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), enemyMat.clone());
+            headMesh.castShadow = true; scene.add(headMesh);
+            const headBody = new CANNON.Body({ mass: 10, shape: new CANNON.Box(new CANNON.Vec3(0.3, 0.3, 0.3)), material: defaultMaterial, fixedRotation: true });
+            headBody.position.set(x, 2.5, z); world.addBody(headBody);
+
+            // Articulación (Cuello) - Mantiene la cabeza unida al torso
+            const neckJoint = new CANNON.LockConstraint(torsoBody, headBody);
+            world.addConstraint(neckJoint);
+
+            const enemyData = { torsoMesh, torsoBody, headMesh, headBody, neckJoint, hp: 100, isDead: false, lastHitTime: 0 };
+            
+            // Asignar datos a los meshes para el Raycaster
+            torsoMesh.userData = { parent: enemyData, type: 'torso' };
+            headMesh.userData = { parent: enemyData, type: 'head' };
+            
+            hitTargets.push(torsoMesh, headMesh);
+            enemies.push(enemyData);
         }
 
-        // Crear 4 enemigos iniciales
-        spawnEnemy(20, 20); spawnEnemy(-20, 20); spawnEnemy(20, -20); spawnEnemy(-20, -20);
+        spawnRagdollEnemy(20, 20); spawnRagdollEnemy(-20, 20); spawnRagdollEnemy(20, -20); spawnRagdollEnemy(-20, -20);
 
-        // 5. SISTEMA DE DISPARO
+        // 5. SISTEMA DE DISPARO Y DAÑO
         let ammo = 30; const maxAmmo = 30; let isAiming = false;
-        const uiAmmo = document.getElementById('ammo'); const crosshair = document.getElementById('crosshair'); const killFeed = document.getElementById('kill-feed');
+        const uiAmmo = document.getElementById('ammo'); const killFeed = document.getElementById('kill-feed');
         
         document.addEventListener('contextmenu', e => e.preventDefault());
         document.addEventListener('mousedown', (e) => { if(!controls.isLocked) return; if(e.button===2) isAiming=true; if(e.button===0) shoot(); });
@@ -140,7 +156,7 @@
 
         const raycaster = new THREE.Raycaster();
         function shoot() {
-            if (ammo <= 0) return;
+            if (ammo <= 0 || playerHealth <= 0) return;
             ammo--; uiAmmo.innerText = `${ammo} / ${maxAmmo}`; weaponGroup.position.z += 0.1;
             
             raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
@@ -148,20 +164,37 @@
             
             if (intersects.length > 0) {
                 const target = intersects[0].object;
-                // Si le disparamos a un enemigo
-                if (target.userData && target.userData.hp !== undefined && !target.userData.isDead) {
-                    target.userData.hp -= 35; // Daño por bala
-                    target.material.color.setHex(0xffffff); // Destello blanco al recibir daño
-                    setTimeout(() => { if(!target.userData.isDead) target.material.color.setHex(0xff0000); }, 100);
+                
+                if (target.userData && target.userData.parent && !target.userData.parent.isDead) {
+                    const enemy = target.userData.parent;
+                    const isHeadshot = target.userData.type === 'head';
                     
-                    if (target.userData.hp <= 0) {
-                        target.userData.isDead = true;
-                        target.material.color.setHex(0x330000); // Color oscuro al morir
-                        killFeed.innerText = "Enemigo Abatido";
+                    // Daño multiplicador por Headshot
+                    enemy.hp -= isHeadshot ? 100 : 35; 
+                    
+                    // Destello de impacto
+                    enemy.torsoMesh.material.color.setHex(0xffffff); enemy.headMesh.material.color.setHex(0xffffff);
+                    setTimeout(() => { if(!enemy.isDead){ enemy.torsoMesh.material.color.setHex(0xff0000); enemy.headMesh.material.color.setHex(0xff0000); } }, 100);
+                    
+                    if (enemy.hp <= 0 && !enemy.isDead) {
+                        enemy.isDead = true;
+                        enemy.torsoMesh.material.color.setHex(0x330000); enemy.headMesh.material.color.setHex(0x330000);
+                        killFeed.innerText = isHeadshot ? "¡TIRO A LA CABEZA!" : "Enemigo Abatido";
                         setTimeout(() => killFeed.innerText = "", 2000);
-                        // Físicas de muerte temporal (caer al piso)
-                        target.userData.body.fixedRotation = false;
-                        target.userData.body.applyImpulse(new CANNON.Vec3(0, 0, -200).applyQuaternion(camera.quaternion), target.userData.body.position);
+                        
+                        // ACTIVAR RAGDOLL: 
+                        // 1. Apagar inteligencia (quitar fixedRotation)
+                        enemy.torsoBody.fixedRotation = false; enemy.headBody.fixedRotation = false;
+                        enemy.torsoBody.updateMassProperties(); enemy.headBody.updateMassProperties();
+                        
+                        // 2. Romper articulación del cuello
+                        world.removeConstraint(enemy.neckJoint);
+                        
+                        // 3. Aplicar impacto físico a la parte específica donde pegó la bala
+                        const impactForce = isHeadshot ? 150 : 250;
+                        const forceVec = new THREE.Vector3(0, 0, -impactForce).applyQuaternion(camera.quaternion);
+                        const bodyToHit = isHeadshot ? enemy.headBody : enemy.torsoBody;
+                        bodyToHit.applyImpulse(new CANNON.Vec3(forceVec.x, forceVec.y + 50, forceVec.z), bodyToHit.position);
                     }
                 }
             }
@@ -169,33 +202,56 @@
 
         document.addEventListener('keydown', (e) => { if(e.key.toLowerCase() === 'r') { ammo = maxAmmo; uiAmmo.innerText = `${ammo} / ${maxAmmo}`; }});
 
-        // 6. MOVIMIENTO Y BUCLE
         const keys = { w: false, a: false, s: false, d: false, space: false };
         document.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; if(e.code==='Space') keys.space=true; });
         document.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; if(e.code==='Space') keys.space=false; });
-
         let canJump = false; playerBody.addEventListener("collide", (e) => { if(e.contact.ni.y > 0.5) canJump = true; });
 
+        // 6. BUCLE PRINCIPAL
         const clock = new THREE.Clock();
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
             world.step(1 / 60, delta, 3);
 
-            // Actualizar Enemigos (IA)
+            // Actualizar lógica de Enemigos y Daño al jugador
             enemies.forEach(enemy => {
-                enemy.position.copy(enemy.userData.body.position);
-                enemy.quaternion.copy(enemy.userData.body.quaternion);
+                enemy.torsoMesh.position.copy(enemy.torsoBody.position);
+                enemy.torsoMesh.quaternion.copy(enemy.torsoBody.quaternion);
+                enemy.headMesh.position.copy(enemy.headBody.position);
+                enemy.headMesh.quaternion.copy(enemy.headBody.quaternion);
                 
-                if (!enemy.userData.isDead && controls.isLocked) {
-                    // IA Básica: Mirar y moverse hacia el jugador
-                    const dir = new THREE.Vector3();
-                    dir.subVectors(playerBody.position, enemy.userData.body.position);
+                if (!enemy.isDead && controls.isLocked && playerHealth > 0) {
+                    const dir = new THREE.Vector3().subVectors(playerBody.position, enemy.torsoBody.position);
+                    const distance = dir.length();
                     dir.y = 0; dir.normalize();
                     
-                    const speed = 200;
-                    enemy.userData.body.force.x = dir.x * speed;
-                    enemy.userData.body.force.z = dir.z * speed;
+                    // Moverse hacia el jugador
+                    const speed = 250;
+                    enemy.torsoBody.force.x = dir.x * speed;
+                    enemy.torsoBody.force.z = dir.z * speed;
+
+                    // Infligir daño al jugador si está muy cerca (ataque cuerpo a cuerpo)
+                    if (distance < 2.5 && time - enemy.lastHitTime > 1.0) {
+                        enemy.lastHitTime = time;
+                        playerHealth -= 15;
+                        uiHealthBar.style.width = Math.max(0, playerHealth) + '%';
+                        if(playerHealth <= 30) uiHealthBar.style.backgroundColor = '#ff0000';
+                        
+                        // Efecto de pantalla ensangrentada
+                        bloodScreen.style.opacity = '1';
+                        setTimeout(() => { if(playerHealth > 0) bloodScreen.style.opacity = '0'; }, 300);
+                        
+                        // Empujón físico al recibir golpe
+                        playerBody.applyImpulse(new CANNON.Vec3(dir.x * 200, 50, dir.z * 200), playerBody.position);
+
+                        if(playerHealth <= 0) {
+                            controls.unlock();
+                            menu.style.display = 'flex';
+                            menu.innerHTML = '<h1 style="color:red; font-size:4rem; margin:0;">HAS MUERTO</h1><p style="color:white;">Presiona F5 para reiniciar</p>';
+                        }
+                    }
                 }
             });
 
@@ -206,7 +262,7 @@
 
             camera.position.set(playerBody.position.x, playerBody.position.y + 1.7, playerBody.position.z);
 
-            if (controls.isLocked) {
+            if (controls.isLocked && playerHealth > 0) {
                 const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); forward.y=0; forward.normalize();
                 const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); right.y=0; right.normalize();
                 const moveDir = new THREE.Vector3();
